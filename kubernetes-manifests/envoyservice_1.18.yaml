@@ -26,8 +26,10 @@ data:
                   - match:
                       prefix: "/"
                     route:
-                      host_rewrite_literal: localhost
+                      host_rewrite_literal: sap-orders-mock-h7pi7igbcq-ew.a.run.app
                       cluster: orderservice
+                # request_headers_to_remove:
+                #   - CustomHeader
               access_log:
               - name: envoy.access_loggers.stdout
                 typed_config:
@@ -55,10 +57,31 @@ data:
                         provider_name: provider1
               - name: envoy.filters.http.router
       clusters:
-      - name: orderservice
+      - name: httpbin
+        connect_timeout: 2s
         type: LOGICAL_DNS
-        # Comment out the following line to test on v6 networks
         dns_lookup_family: V4_ONLY
+        lb_policy: ROUND_ROBIN
+        load_assignment:
+          cluster_name: httpbin
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: "httpbin.org"
+                    port_value: 443
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            sni: "httpbin.org"  
+      - name: orderservice
+        connect_timeout: 2s
+        type: LOGICAL_DNS
+        http2_protocol_options: {}
+        dns_lookup_family: V4_ONLY
+        lb_policy: ROUND_ROBIN
         load_assignment:
           cluster_name: orderservice
           endpoints:
@@ -66,10 +89,16 @@ data:
             - endpoint:
                 address:
                   socket_address:
-                    address: orderservice
-                    port_value: 8080
+                    address: sap-orders-mock-h7pi7igbcq-ew.a.run.app
+                    port_value: 443
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            sni: sap-orders-mock-h7pi7igbcq-ew.a.run.app
       - name: jwks_cluster
         type: STRICT_DNS
+        connect_timeout: 5s
         load_assignment:
           cluster_name: jwks_cluster
           endpoints:
@@ -85,21 +114,21 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: envoy-deployment
+  name: basicenvoyservice-deployment
 spec:
-  replicas: 20
+  replicas: 1
   selector:
     matchLabels:
-      app: envoyservice  
+      app: basicenvoyservice  
   template: 
     metadata:
-      name: envoyservice
+      name: basicenvoyservice
       labels:
-        app: envoyservice  
+        app: basicenvoyservice  
     spec:
       containers:
         - name: envoy
-          image: envoyproxy/envoy:v1.21-latest
+          image: envoyproxy/envoy:v1.18-latest
           args: ["--config-path", "/config/envoy-config.yaml"]
           resources:
             requests:
@@ -113,12 +142,9 @@ spec:
             mountPath: "/config"
             readOnly: true
       volumes:
-        # You set volumes at the Pod level, then mount them into containers inside that Pod
         - name: config
           configMap:
-            # Provide the name of the ConfigMap you want to mount.
             name: envoy-config
-            # An array of keys from the ConfigMap to create as files
             items:
             - key: "envoy-config.yaml"
               path: "envoy-config.yaml"
@@ -126,13 +152,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: envoyservice
+  name: basicenvoyservice
   labels:
-    app: envoyservice
+    app: basicenvoyservice
 spec:
   ports:
   - port: 10000
     name: http
   selector:
-    app: envoyservice
+    app: basicenvoyservice
   type: LoadBalancer
